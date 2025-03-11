@@ -2,41 +2,55 @@ import numpy as np
 from scipy.optimize import linprog
 from scipy.optimize import minimize
 
-
 """
 minimisation basique avec python 
 """
 # Paramètres du problème
-c1= np.array([2,3])
-c2= np.array([5,4])
-#c2= np.array([5,4])
+
+A1 = np.array([[2, 2], [2, -1], [2, 1]])  # Contraintes plus variées en R^2
+
+b1 = np.array([9, 2, 3])
+c1 = np.array([4, 1])
+
+E1 = np.array([[1, 1], [2, -1], [-1, 0]])
+
+A2 = np.array([[3, 2], [-1, 2], [1, -1]])  # Contraintes pour la 2ème étape
+b2 = np.array([1, 3, 1])
+c2 = np.array([2, 2])
+
+"""
+T = 3
+n1, n2 = 2, 2  # Dimension des blocs
+# Définitions des vecteurs et matrices
+c1 = np.array([1, 2])  # Coefficients pour x1
+c2 = np.array([3, 1])  # Coefficients pour x2
+#c3 = np.array([4, 5])  # Coefficients pour x3
+c3 = np.array([1, 1])
+
+A1 = np.array([[2, -1], [1, 3]])  # Contraintes sur x1
+b1 = np.array([1, 2])  # Second membre pour A1 x1 >= b1
+
+E1 = np.array([[1, 0], [0, 1]])  # Contraintes pour E1 x1
+A2 = np.array([[3, 2], [1, 4]])  # Contraintes sur A2 x2
+b2 = np.array([4, 5])  # Second membre pour E1 x1 + A2 x2 >= b2
+
+E2 = np.array([[2, 0], [0, 3]])  # Contraintes pour E2 x2
+A3 = np.array([[1, 2], [2, 1]])  # Contraintes sur A3 x3
+b3 = np.array([3, 6])  # Second membre pour E2 x2 + A3 x3 >= b3
+"""
 
 
 
+# Résolution du problème de programmation linéaire par linprog
+# Contraintes globales combinées
+A_l1 = np.concatenate((A1,np.zeros((A1.shape[0],A2.shape[1]))),axis=1)
+A_l2 = np.concatenate((E1,A2),axis=1)
+A = np.concatenate((A_l1,A_l2),axis=0)
+b = np.concatenate([b1, b2],axis=0)
+# Fusionner les coefficients de la fonction objectif
+c = np.concatenate((c1, c2),axis=0)
 
-c = np.hstack((c1.flatten(), c2.flatten()))  # Vecteur de coût de taille (4,1)
-#vecteur de taille 4*1
-
-# A1,A2 et E1 matrice 3x2 donc pas nécessairement carrée
-A1 = np.array([[1, 2], 
-               [3, 4], 
-               [ 5, 6]])
-
-A2= np.array([[5, 2], 
-               [9, 3], 
-               [ 8, 3]])
-
-E1 = np.array([[7, 8], 
-               [9, 1], 
-               [ 2, 3]])
-
-A = np.vstack((-A1 @ np.eye(2, 4), -(E1 @ np.eye(2, 4) + A2 @ np.eye(2, 4))))
-
-
-b1 = np.array([1, 2, 3])
-b2 = np.array([9, 8, 2])
-b = np.vstack((-b1, -b2)).flatten()
-
+#print(A)
 
 
 
@@ -63,9 +77,11 @@ def solve_stage_problem(c, A, b, cutting_planes):
     #revoir les reshape flatten
     #forme de cutting planes soit pi*x1 ou - ... revoir les signes 
     m, n = A.shape
-    p = len(cutting_planes) 
+    p = len(cutting_planes)
+    xt_dim = len(c)
     if p == 0:  
-        res = linprog(c, A_ub=-A, b_ub=-b, method='highs')
+        res = linprog(c, A_ub=-A, b_ub=-b, bounds=(0,None), method='highs')
+        print(A1,c1,b1)
         return res 
      
     else:
@@ -81,8 +97,10 @@ def solve_stage_problem(c, A, b, cutting_planes):
         b_aug = np.concatenate((b, b_cutting))
     
         c_aug = np.concatenate((c, [1]))  
+        bounds = [(0, None) for _ in range(xt_dim)]
+        bounds.append((None, None))
 
-        res = linprog(c_aug, A_ub=-A_aug, b_ub=-b_aug , method='highs')
+        res = linprog(c_aug, A_ub=-A_aug, b_ub=-b_aug, bounds = bounds, method='highs')
         return res 
         
 
@@ -100,7 +118,8 @@ index=0
 # Résoudre le problème de minimisation qui nous donne x1_hat
 while z_sup - z_min > epsilon and index < 10:
     index = index + 1
-    #print(cutting_planes)
+    
+
     # Étape (a): Résolution du premier sous-problème
     res1= solve_stage_problem(c1, A1, b1, cutting_planes)     
     if not res1.success:
@@ -131,8 +150,8 @@ while z_sup - z_min > epsilon and index < 10:
      # Calcul du nouveau cutting plane
     ai = np.dot(res_py, E1)
     bi = np.dot(res_py, b2)
-    print(ai)
-    print(bi)
+
+
     # Ajout aux cutting planes
     cutting_planes.append((ai, bi))
 
@@ -140,6 +159,7 @@ while z_sup - z_min > epsilon and index < 10:
     # Étape (c): Calcul de z_sup
     print(f"res_py: {res_py}")
     z_sup = np.dot(c1, x1_hat) + np. dot(c2,x2_hat)
+    
     print(f"z_sup à l'iteration {index} est égal à  {z_sup}")
     print(f"z_min à l'iteration {index}est égal à {z_min}")
     print (f"x1_hat: {x1_hat}")
@@ -149,19 +169,10 @@ while z_sup - z_min > epsilon and index < 10:
 # Résultat final
 
 print("Optimisation terminée.")
-# print(f"z_sup final: {z_sup}")
-#print(f"z_inf final: {z_min}")
+print(f"z_sup final: {z_sup}")
+print(f"z_inf final: {z_min}")
 
 
-
-result = linprog(c, A_ub=A, b_ub=b, method="highs")
+result = linprog(c, A_ub=-A, b_ub=-b, method="highs")
 print (f"resultat avec la méthode classique: {result.x}")
-#print(linprog(c1,-A1,-b1,method="highs").x)
-#print(linprog(c2,-A2,-b2+np.dot(E1,np.array([0,0.5])),method="highs"))
-'''
-c3 = np.concatenate((c1, [1])) 
-A3 = np.block([
-             [A1, np.zeros((3, 1))],   
-             [np.array([7,8]), np.ones((1, 1))] 
-         ])'''
-#print(linprog(c3, A_ub=-A3, b_ub=-np.array([1,2,3,9]), method='highs').x)
+
