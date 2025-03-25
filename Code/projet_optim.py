@@ -81,9 +81,9 @@ def solve_stage_problem(c, A, b, cutting_planes):
     xt_dim = len(c)
     if p == 0:  
         res = linprog(c, A_ub=-A, b_ub=-b, bounds=(0,None), method='highs')
-        print(A1,c1,b1)
-        return res 
-     
+        return res
+        #print(A1,c1,b1)
+           
     else:
         
         

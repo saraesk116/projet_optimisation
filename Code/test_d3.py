@@ -1,4 +1,4 @@
-# dans cutting planes on stocke les coupes ai =pi*E1 et bi= pi*b2
+
 import numpy as np
 from scipy.optimize import linprog
 from scipy.optimize import minimize
@@ -31,10 +31,16 @@ c_vectors = [c1, c2, c3]
 A_matrices = [A1, A2, A3]
 b_vectors = [b1, b2, b3]
 E_matrices = [E1, E2]
-x_hats = {}
+x_hats = {t: np.zeros(len(c_vectors[t])) for t in range(T)}
 results = {}
 
-
+""""
+x1_chapeau= linprog(c1, A_ub=-A1, b_ub=-b1, bounds=(0,None), method='highs').x
+x2_chapeau= linprog(c2, A_ub=-A2, b_ub=-b2, bounds=(0,None), method='highs').x
+x3_chapeau= linprog(c3, A_ub=-A3, b_ub=-b3, bounds=(0,None), method='highs').x
+print(f"x1_chapeau: {x1_chapeau}")
+print(f"x2_chapeau: {x2_chapeau}")
+print(f"x3_chapeau: {x3_chapeau}")"""
 
 # Résolution du problème de programmation linéaire par linprog
 # Contraintes globales combinées
@@ -46,7 +52,7 @@ A_l3 = np.concatenate((np.zeros((A3.shape[0], A1.shape[1])), E2, A3), axis=1)
 A = np.concatenate((A_l1, A_l2, A_l3), axis=0)
 b = np.concatenate((b1, b2, b3), axis=0)
 c = np.concatenate((c1, c2, c3), axis=0)
-#print(A)
+
 
 def solve_stage_problem(c, A, b, cutting_planes):
     """
@@ -96,15 +102,13 @@ def solve_stage_problem(c, A, b, cutting_planes):
 
 
 # Initialisation
-cutting_planes=[[]for i in range T]
+cutting_planes = [[] for i in range(T)] #liste de T listes vides qu'on va remplir les multiplicateurs de lagrange a chaque étage
 z_sup = np.inf
 z_min = -np.inf 
 epsilon = 0.001
 index=0
 
-# Comparaison avec la méthode classique (résolution globale)
-result = linprog(np.concatenate(c_vectors), A_ub=-A, b_ub=-b, method="highs")
-print(f"\n🎯 **Résultat global avec la méthode classique:** {result.x}")
+
 
 
 
@@ -115,48 +119,76 @@ while z_sup - z_min > epsilon and index < 10:
 
     # Étape (a): Forward Simulation (1 → T)
     for t in range(T):
-        res = solve_stage_problem(c_vectors[t], A_matrices[t], b_vectors[t], cutting_planes)
-        if not res.success:
-            raise ValueError(f"⚠️ Échec de l'optimisation Forward à l'étape {t+1}")
-
-        x_hats[t] = res.x[:len(c_vectors[t])]  # Exclure alpha si présent
+        print(f"Iteration forward: {t+1}")
+        if t==0:
+            res = solve_stage_problem(c_vectors[t], A_matrices[t], b_vectors[t], cutting_planes[t])
+            if res.success:
+                x_hats[t] = res.x[:len(c_vectors[t])]
+                
+            else:
+                raise ValueError(f"⚠️ Échec de l'optimisation à l'étape {t}")
+        else: 
+            rhs= b_vectors[t]-E_matrices[t-1]@ x_hats[t-1]
+            res= solve_stage_problem(c_vectors[t], A_matrices[t], rhs, cutting_planes[t])
+        if res.success:
+            x_hats[t] = res.x[:len(c_vectors[t])]
+            
+        else:
+            raise ValueError(f"⚠️ Échec de l'optimisation Forward à l'étape {t}")
         results[t] = res  # Stocker le résultat de chaque étape
-
+        
+        
+    
     # Mise à jour de z_min après la dernière étape
     z_min = results[0].fun
-    #print(x_hats)
     
-    # Étape (b): Backward Recursion (T → 1) 
-    for t in range(T-1, 0, -1):  # python commence à 0
-        res_py = np.abs(results[t].ineqlin.marginals)  # Multiplicateurs de Lagrange
-        #print(res_py)
-        # Calcul de la nouvelle coupe avec E_t-1 et b_t
-        ai = np.dot(res_py, E_matrices[t-1])
-        bi = np.dot(res_py, b_vectors[t])
-        print ("ai=",ai)
-        print ("bi=",bi)
-        # Ajouter la nouvelle contrainte de coupure
-        cutting_planes[t].append((ai, bi))
-        print(cutting_planes)
-        # Résoudre à nouveau l'étape précédente avec les nouvelles contraintes
-        results[t-1] = solve_stage_problem(c_vectors[t-1], A_matrices[t-1], b_vectors[t-1], cutting_planes)
-        print(results[t-1].x)
-        if not results[t-1].success:
-            raise ValueError(f"⚠️ Échec de l'optimisation Backward à l'étape {t}")
 
-        x_hats[t-1] = results[t-1].x[:len(c_vectors[t-1])]  # Mise à jour de la solution optimale
-        # Étape (c): Mise à jour de z_sup
-        z_sup = sum(np.dot(c_vectors[t], x_hats[t]) for t in range(T))
+    
+
+
+        # Étape (b): Backward Recursion (T → 1)
+    for t in range(T - 1, 0, -1):  # T-1, T-2, ..., 1
+        print(f"Iteration backward: {t + 1}")
+    
+    # Réutiliser x_hats[t-1] pour calculer rhs
+        if t > 1:
+            rhs_backward = b_vectors[t-1] - E_matrices[t-2] @ x_hats[t-2]
+        else:
+            rhs_backward = b_vectors[t]
+    
+        # Résoudre le sous-problème backward avec coupes actuelles
+        res_backward = solve_stage_problem(c_vectors[t], A_matrices[t], rhs_backward, cutting_planes[t])
+        if not res_backward.success:
+            raise ValueError(f"⚠️ Échec Backward étape {t}")
+    
+        # Extraire les multiplicateurs de LAGRANGE BACKWARD
+        res_py = res_backward.ineqlin.marginals[:E_matrices[t-1].shape[0]]
+        print(f"Multiplicateurs BACKWARD (étape {t}): {res_py}")
+    
+        # Calculer la coupe pour l'étape t-1
+        ai = np.dot(res_py, E_matrices[t-1])
+        bi = np.dot(res_py, b_vectors[t])  # rhs_backward, pas b_vectors[t]
+    
+        # Ajouter la coupe à l'étape t-1
+        cutting_planes[t-1].append((ai, bi))
+        print(f"Coupes à l'étape {t-1}: {cutting_planes[t-1]}")
+    
+    # Mettre à jour x_hats[t-1] si nécessaire (optionnel)
+    # x_hats[t-1] = res_backward.x[:len(c_vectors[t-1])  # Décommenter si besoin
+   
+    z_sup = sum(np.dot(c_vectors[t], x_hats[t]) for t in range(T))
 
         # 🔍 Affichage des résultats intermédiaires
-        print(f"🟢 z_sup à l'itération {index} = {z_sup}")
-        print(f"🟠 z_min à l'itération {index} = {z_min}")
+    print(f"🟢 z_sup à l'itération {index} = {z_sup}")
+    print(f"🟠 z_min à l'itération {index} = {z_min}")
+    #print(f"🔵 x_hats à l'itération {index} = {x_hats}")
 
-    for t in range(T):
-        print(f"  x{t+1}_hat: {x_hats[t]}")
 
 # ---------------------- Résultat Final ---------------------- #
 print("\n✅ **Optimisation terminée.**")
 print(f"✅ z_sup final: {z_sup}")
 print(f"✅ z_inf final: {z_min}")
-
+print(x_hats)
+# Comparaison avec la méthode classique (résolution globale)
+result = linprog(np.concatenate(c_vectors), A_ub=-A, b_ub=-b, method="highs")
+print(f"\n🎯 **Résultat global avec la méthode classique:** {result.x}")
