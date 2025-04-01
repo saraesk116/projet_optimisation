@@ -1,93 +1,178 @@
+# dans cutting planes on stocke les coupes ai =pi*E1 et bi= pi*b2
 import numpy as np
 from scipy.optimize import linprog
+from scipy.optimize import minimize
+
 
 # Paramètres du problème
+
+
+
 T = 3
-c_vectors = [np.array([1, 2]), np.array([3, 1]), np.array([1, 1])]
-A_matrices = [np.array([[2, -1], [1, 3]]), np.array([[3, 2], [1, 4]]), np.array([[1, 2], [2, 1]])]
-b_vectors = [np.array([1, 2]), np.array([4, 5]), np.array([3, 6])]
-E_matrices = [np.array([[1, 0], [0, 1]]), np.array([[2, 0], [0, 3]])]
+n1, n2 = 2, 2  # Dimension des blocs
+# Définitions des vecteurs et matrices
+c1 = np.array([1, 2])  # Coefficients pour x1
+c2 = np.array([3, 1])  # Coefficients pour x2
+#c3 = np.array([4, 5])  # Coefficients pour x3
+c3 = np.array([1, 1])
 
-# Résolution globale de référence
-A_global = np.block([
-    [A_matrices[0], np.zeros((2, 4))],
-    [E_matrices[0], A_matrices[1], np.zeros((2, 2))],
-    [np.zeros((2, 2)), E_matrices[1], A_matrices[2]]
-])
-result_global = linprog(np.concatenate(c_vectors), A_ub=-A_global, b_ub=-np.concatenate(b_vectors), method='highs')
-print(f"Solution globale optimale: {result_global.x}\n")
 
-def solve_stage(t, prev_x=None, cuts=[]):
-    """Résout une étape avec coupes et contraintes de liaison."""
-    c = c_vectors[t]
-    A = A_matrices[t]
-    b = b_vectors[t].copy()
-    
-    # Ajustement pour les contraintes de liaison
-    if t > 0 and prev_x is not None:
-        b -= E_matrices[t-1] @ prev_x
-    
-    # Ajout des coupes
-    if cuts:
-        A_cut = np.array([cut[0] for cut in cuts])
-        b_cut = np.array([cut[1] for cut in cuts])
-        A = np.vstack([A, A_cut])
-        b = np.hstack([b, b_cut])
-    
-    res = linprog(c, A_ub=-A, b_ub=-b, bounds=(0, None), method='highs')
-    if not res.success:
-        raise ValueError(f"Échec étape {t}: {res.message}")
-    return res.x, res.ineqlin.marginals
+A1 = np.array([[2, -1], [1, 3]])  # Contraintes sur x1
+b1 = np.array([1, 2])  # Second membre pour A1 x1 >= b1
 
-# Algorithme de Benders
-cutting_planes = [[] for _ in range(T)]
+E1 = np.array([[1, 0], [0, 1]])  # Contraintes pour E1 x1
+A2 = np.array([[3, 2], [1, 4]])  # Contraintes sur A2 x2
+b2 = np.array([4, 5])  # Second membre pour E1 x1 + A2 x2 >= b2
+
+E2 = np.array([[2, 0], [0, 3]])  # Contraintes pour E2 x2
+A3 = np.array([[1, 2], [2, 1]])  # Contraintes sur A3 x3
+b3 = np.array([3, 6])  # Second membre pour E2 x2 + A3 x3 >= b3
+c_vectors = [c1, c2, c3]
+A_matrices = [A1, A2, A3]
+b_vectors = [b1, b2, b3]
+E_matrices = [E1, E2]
+x_hats = {}
+results = {}
+
+
+
+# Résolution du problème de programmation linéaire par linprog
+# Contraintes globales combinées
+# Construction de la matrice A pour T=3
+A_l1 = np.concatenate((A1, np.zeros((A1.shape[0], A2.shape[1])), np.zeros((A1.shape[0], A3.shape[1]))), axis=1)
+A_l2 = np.concatenate((E1, A2, np.zeros((A2.shape[0], A3.shape[1]))), axis=1)
+A_l3 = np.concatenate((np.zeros((A3.shape[0], A1.shape[1])), E2, A3), axis=1)
+
+A = np.concatenate((A_l1, A_l2, A_l3), axis=0)
+b = np.concatenate((b1, b2, b3), axis=0)
+c = np.concatenate((c1, c2, c3), axis=0)
+#print(A)
+
+def solve_stage_problem(c, A, b, cutting_planes):
+    """
+    Résout le problème d'optimisation en fonction de la présence de contraintes de cutting planes.
+
+    Paramètres :
+    - c1 : Vecteur coût pour x1
+    - A1, b1 : Contraintes A1 * x1 >= b1
+    - E1, b2 : Paramètres pour le cas complexe
+    - Pi2_T : Matrice de projection
+    - cutting_planes : Liste des contraintes supplémentaires (ai, bi) mises à jour
+
+    Retour :
+    - Solution optimisée (x1, alpha)
+    """
+    #2eme algo d'optim c2x2 utiliser solve_stage avec liste_vide ok
+    #renvoyer que res dans la fonction
+    #resoudre les pb à la main et afficher les matrices a chaque iteration 
+    #revoir les reshape flatten
+    #forme de cutting planes soit pi*x1 ou - ... revoir les signes 
+    m, n = A.shape
+    p = len(cutting_planes)
+    xt_dim = len(c)
+    if p == 0:  
+        res = linprog(c, A_ub=-A, b_ub=-b, bounds=(0,None), method='highs')
+        return res
+           
+    else:
+        
+        
+        A_cutting = np.vstack([ai for ai, _ in cutting_planes])  
+        b_cutting = np.array([bi for _, bi in cutting_planes])
+        
+        A_aug = np.block([
+            [A, np.zeros((m, 1))],   
+            [A_cutting, np.ones((p, 1))]  
+        ])
+        b_aug = np.concatenate((b, b_cutting))
+    
+        c_aug = np.concatenate((c, [1]))  
+        bounds = [(0, None) for _ in range(xt_dim)]
+        bounds.append((None, None))
+
+        res = linprog(c_aug, A_ub=-A_aug, b_ub=-b_aug, bounds = bounds, method='highs')
+        return res 
+        
+
+
+# Initialisation
+cutting_planes = [[] for i in range(T)]
 z_sup = np.inf
-z_inf = -np.inf
-epsilon = 0.1  # Relaxation pour l'exemple
-history = []
+z_min = -np.inf 
+epsilon = 0.001
+index=0
 
-for it in range(10):
-    # Forward pass
-    x_hat = []
-    for t in range(T):
-        x_prev = x_hat[t-1] if t > 0 else None
-        x_t, _ = solve_stage(t, x_prev, cutting_planes[t])
-        x_hat.append(x_t)
-    
-    z_sup_new = sum(c @ x for c, x in zip(c_vectors, x_hat))
-    history.append(("Forward", z_sup_new))
-    
-    # Backward pass - Génération des coupes
-    new_cuts = [[] for _ in range(T)]
-    for t in range(T-1, 0, -1):
-        _, pi = solve_stage(t, x_hat[t-1])  # Résolution duale
-        ai = pi @ E_matrices[t-1]
-        bi = pi @ b_vectors[t]
-        new_cuts[t-1].append((ai, bi))
-    
-    # Mise à jour des coupes
-    for t in range(T):
-        cutting_planes[t].extend(new_cuts[t])
-    
-    # Calcul de z_inf (avec coupes)
-    z_inf_new = 0
-    x_inf = []
-    for t in range(T):
-        x_t, _ = solve_stage(t, None, cutting_planes[t])
-        z_inf_new += c_vectors[t] @ x_t
-        x_inf.append(x_t)
-    
-    history.append(("Backward", z_inf_new))
-    
-    print(f"\nIteration {it+1}:")
-    print(f"z_sup = {z_sup_new:.2f}, z_inf = {z_inf_new:.2f}")
-    print(f"Gap = {z_sup_new - z_inf_new:.2f}")
-    
-    if abs(z_sup_new - z_inf_new) < epsilon:
-        break
+# Comparaison avec la méthode classique (résolution globale)
+result = linprog(np.concatenate(c_vectors), A_ub=-A, b_ub=-b, method="highs")
+print(f"\n🎯 **Résultat global avec la méthode classique:** {result.x}")
 
-# Résultats finaux
-print("\nConvergence atteinte !")
-print(f"z_sup final: {z_sup_new:.2f}")
-print(f"z_inf final: {z_inf_new:.2f}")
-print(f"Solution globale: {result_global.x}")
+
+
+# Résoudre le problème de minimisation qui nous donne x1_hat
+while z_sup - z_min > epsilon and index < 10:
+    index += 1
+    print(f"\n🔄 **Itération {index}**")
+
+    # Étape (a): Forward Simulation (1 → T)
+    for t in range(T):
+        res = solve_stage_problem(c_vectors[t], A_matrices[t], b_vectors[t], cutting_planes[t])
+        if not res.success:
+            raise ValueError(f"⚠️ Échec de l'optimisation Forward à l'étape {t+1}")
+
+        x_hats[t] = res.x[:len(c_vectors[t])]  # Exclure alpha si présent
+        results[t] = res  # Stocker le résultat de chaque étape
+
+    # Mise à jour de z_min après la dernière étape
+    z_min = results[0].fun
+    #print(x_hats)
+    # ... (le reste du code reste inchangé jusqu'à la partie Backward Recursion)
+    print(f"xhat = {x_hats}")
+
+# Étape (b): Backward Recursion (T → 1) 
+    for t in range(T-1, 0, -1):  # t = 2, puis t=1 pour T=3
+    # Extraire les multiplicateurs de Lagrange correctement (sans valeur absolue)
+        res_py = results[t].ineqlin.marginals  # Retirer np.abs()
+    
+    # Calculer ai et bi avec les duals corrects
+        ai = res_py @ E_matrices[t-1]  # Utiliser @ pour le produit matriciel
+        bi = res_py @ b_vectors[t]
+    
+        print(f"Coupe générée pour l'étape {t-1}: ai={ai}, bi={bi}")
+    
+    # Vérifier si la coupe est valide (non nulle)
+        if np.allclose(ai, 0) and not np.isclose(bi, 0):
+            print("Avertissement : Coupe non valide (contrainte 0x >= b). Ignorée.")
+            continue
+    
+    # Ajouter la coupe à l'étape précédente
+        cutting_planes[t-1].append((ai, bi))
+    
+    # Résoudre l'étape précédente avec les nouvelles coupes
+        try:
+            results[t-1] = solve_stage_problem(c_vectors[t-1], A_matrices[t-1], b_vectors[t-1], cutting_planes[t-1])
+            if not results[t-1].success:
+                print(f"⚠️ Aucune solution trouvée à l'étape {t-1} avec les coupes. Relaxation des contraintes.")
+                # Relaxer les coupes ou gérer l'infaisabilité
+                cutting_planes[t-1].pop()  # Retirer la dernière coupe
+                results[t-1] = solve_stage_problem(c_vectors[t-1], A_matrices[t-1], b_vectors[t-1], cutting_planes[t-1])
+        except ValueError as e:
+            print(f"Erreur : {e}")
+            break
+        
+        x_hats[t-1] = results[t-1].x[:len(c_vectors[t-1])]  # Mise à jour de la solution optimale
+        # Étape (c): Mise à jour de z_sup
+        z_sup = sum(np.dot(c_vectors[t], x_hats[t]) for t in range(T))
+
+        # 🔍 Affichage des résultats intermédiaires
+        print(f"🟢 z_sup à l'itération {index} = {z_sup}")
+        print(f"🟠 z_min à l'itération {index} = {z_min}")
+
+    for t in range(T):
+        print(f"  x{t+1}_hat: {x_hats[t]}")
+
+# ---------------------- Résultat Final ---------------------- #
+print("\n✅ **Optimisation terminée.**")
+print(f"✅ z_sup final: {z_sup}")
+print(f"✅ z_inf final: {z_min}")
+
+
