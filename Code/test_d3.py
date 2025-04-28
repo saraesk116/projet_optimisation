@@ -15,15 +15,11 @@ c1 = np.array([1, 2])  # Coefficients pour x1
 c2 = np.array([3, 1])  # Coefficients pour x2
 #c3 = np.array([4, 5])  # Coefficients pour x3
 c3 = np.array([1, 1])
-
-
 A1 = np.array([[2, -1], [1, 3]])  # Contraintes sur x1
 b1 = np.array([1, 2])  # Second membre pour A1 x1 >= b1
-
 E1 = np.array([[1, 0], [0, 1]])  # Contraintes pour E1 x1
 A2 = np.array([[3, 2], [1, 4]])  # Contraintes sur A2 x2
 b2 = np.array([4, 5])  # Second membre pour E1 x1 + A2 x2 >= b2
-
 E2 = np.array([[2, 0], [0, 3]])  # Contraintes pour E2 x2
 A3 = np.array([[1, 2], [2, 1]])  # Contraintes sur A3 x3
 b3 = np.array([3, 6])  # Second membre pour E2 x2 + A3 x3 >= b3
@@ -31,16 +27,11 @@ c_vectors = [c1, c2, c3]
 A_matrices = [A1, A2, A3]
 b_vectors = [b1, b2, b3]
 E_matrices = [E1, E2]
+
+
 x_hats = {t: np.zeros(len(c_vectors[t])) for t in range(T)}
 results = {}
 
-""""
-x1_chapeau= linprog(c1, A_ub=-A1, b_ub=-b1, bounds=(0,None), method='highs').x
-x2_chapeau= linprog(c2, A_ub=-A2, b_ub=-b2, bounds=(0,None), method='highs').x
-x3_chapeau= linprog(c3, A_ub=-A3, b_ub=-b3, bounds=(0,None), method='highs').x
-print(f"x1_chapeau: {x1_chapeau}")
-print(f"x2_chapeau: {x2_chapeau}")
-print(f"x3_chapeau: {x3_chapeau}")"""
 
 # Résolution du problème de programmation linéaire par linprog
 # Contraintes globales combinées
@@ -201,5 +192,5 @@ print(f"✅ z_sup final: {z_sup}")
 print(f"✅ z_inf final: {z_min}")
 print(x_hats)
 # Comparaison avec la méthode classique (résolution globale)
-result = linprog(np.concatenate(c_vectors), A_ub=-A, b_ub=-b, method="highs")
+result = linprog(c, A_ub=-A, b_ub=-b, method="highs")
 print(f"\n🎯 **Résultat global avec la méthode classique:** {result.x}")
